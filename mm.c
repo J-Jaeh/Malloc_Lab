@@ -48,7 +48,7 @@ team_t team = {
 
 #define DSIZE 8 /*더블 워드 크기*/
 
-#define CHUNKSIZE (1 << 12); /*초기 가용블럭과 힙확장을 위한 기본크기*/
+#define CHUNKSIZE (1 << 12) /*초기 가용블럭과 힙확장을 위한 기본크기*/
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -57,8 +57,8 @@ team_t team = {
 #define GET(p) (*(unsigned int *)(p))              /* p가 가리키는 워드를 읽어서 리턴*/
 #define PUT(p, val) (*(unsigned int *)(p) = (val)) /* 워드에 val 저장*/
 
-#define GET_SIZE(p) (GET(p) & ~0x7)
-#define GET_ALLOC(p) (GET(p) & 0x01)
+#define GET_SIZE(p) (GET(p) & ~0x7)  /* 헤더 또는 풋터의 사이즈 리턴*/
+#define GET_ALLOC(p) (GET(p) & 0x01) /* 헤더 또는 풋터의 할당비트 리턴 */
 
 #define HDRP(bp) ((char *)(bp)-WSIZE)
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
@@ -66,12 +66,32 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 
+static void *extend_heap(size_t);
+
 /*
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
+
+    /*빈 가용 리스트를 만들기위헤 메모리 시스템에서 4워드를 가져온다*/
+    void *heap_listp = mem_sbrk(4 * WSIZE);
+    if ((heap_listp) == (void *)-1)
+        return -1;
+    PUT(heap_listp, 0);
+    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
+    heap_listp += (2 * WSIZE);
+
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+        return -1;
+
     return 0;
+}
+
+static void *extend_heap(size_t words)
+{
 }
 
 /*
