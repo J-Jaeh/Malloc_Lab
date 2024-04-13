@@ -52,8 +52,8 @@ team_t team = {
 #define GET_SIZE(p) (GET(p) & ~0x7)  /* 헤더 또는 풋터의 사이즈 리턴*/
 #define GET_ALLOC(p) (GET(p) & 0x01) /* 헤더 또는 풋터의 할당비트 리턴 */
 
-#define HDRP(bp) ((char *)(bp)-WSIZE)
-#define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
+#define GET_HEAD_POINTER(bp) ((char *)(bp)-WSIZE)
+#define GET_FOOT_POINTER(bp) ((char *)(bp) + GET_SIZE(GET_HEAD_POINTER(bp)) - DSIZE)
 
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
@@ -95,9 +95,9 @@ static void *extend_heap(size_t words)
     if ((long)(bp = mem_sbrk(size)) == -1)
         return NULL;
 
-    PUT(HDRP(bp), PACK(size, 0));
-    PUT(FTRP(bp), PACK(size, 0));
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
+    PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
+    PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
+    PUT(GET_HEAD_POINTER(NEXT_BLKP(bp)), PACK(0, 1));
 
     return coalesce(bp);
 }
@@ -138,42 +138,42 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    size_t size = GET_SIZE(HDRP(ptr));
+    size_t size = GET_SIZE(GET_HEAD_POINTER(ptr));
 
-    PUT(HDRP(ptr), PACK(size, 0));
-    PUT(FTRP(ptr), PACK(size, 0));
+    PUT(GET_HEAD_POINTER(ptr), PACK(size, 0));
+    PUT(GET_FOOT_POINTER(ptr), PACK(size, 0));
 
     coalesce(ptr);
 }
 
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
-    size_t size = GET_SIZE(HDRP(bp));
+    size_t prev_alloc = GET_ALLOC(GET_FOOT_POINTER(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(GET_HEAD_POINTER(NEXT_BLKP(bp)));
+    size_t size = GET_SIZE(GET_HEAD_POINTER(bp));
 
     // 앞 뒤 free블록이면 병합//
     if (prev_alloc && next_alloc)
         return bp;
     else if (prev_alloc && !next_alloc) /*다음블록이랑 병합할 수 있는 경우 -> head 는 현재 foot는 업데이트된 size를받아서 현재bp 기준으로 업데이트된만큼가서 지정?*/
     {
-        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
-        PUT(HDRP(bp), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
+        size += GET_SIZE(GET_HEAD_POINTER(NEXT_BLKP(bp)));
+        PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
+        PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
     }
     else if (!prev_alloc && next_alloc) /*이전 블록과 통합.. foot 먼저 지정해야 오류가 없을듯?*/
     {
-        size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(FTRP(bp), PACK(size, 0));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp)));
+        PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
+        PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
     else
     {
-        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp))) + GET_SIZE(GET_FOOT_POINTER(NEXT_BLKP(bp)));
 
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(GET_FOOT_POINTER(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
 
@@ -193,7 +193,7 @@ void *mm_realloc(void *bp, size_t size)
     newptr = mm_malloc(size);
     if (newptr == NULL)
         return NULL;
-    copySize = GET_SIZE(HDRP(oldptr));
+    copySize = GET_SIZE(GET_HEAD_POINTER(oldptr));
     if (size < copySize)
         copySize = size;
     memcpy(newptr, oldptr, copySize);
@@ -219,9 +219,9 @@ static void *find_fit(size_t asize)
 {
     /*First-fit search*/
     void *bp;
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
+    for (bp = heap_listp; GET_SIZE(GET_HEAD_POINTER(bp)) > 0; bp = NEXT_BLKP(bp))
     {
-        if ((!GET_ALLOC(HDRP(bp))) && (asize <= GET_SIZE(HDRP(bp))))
+        if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
         {
             return bp;
         }
@@ -231,19 +231,19 @@ static void *find_fit(size_t asize)
 
 static void place(void *bp, size_t asize)
 {
-    size_t csize = GET_SIZE(HDRP(bp));
+    size_t csize = GET_SIZE(GET_HEAD_POINTER(bp));
 
     if ((csize - asize) >= (2 * DSIZE))
     {
-        PUT(HDRP(bp), PACK(asize, 1));
-        PUT(FTRP(bp), PACK(asize, 1));
+        PUT(GET_HEAD_POINTER(bp), PACK(asize, 1));
+        PUT(GET_FOOT_POINTER(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
-        PUT(HDRP(bp), PACK(csize - asize, 0));
-        PUT(FTRP(bp), PACK(csize - asize, 0));
+        PUT(GET_HEAD_POINTER(bp), PACK(csize - asize, 0));
+        PUT(GET_FOOT_POINTER(bp), PACK(csize - asize, 0));
     }
     else
     {
-        PUT(HDRP(bp), PACK(csize, 1));
-        PUT(FTRP(bp), PACK(csize, 1));
+        PUT(GET_HEAD_POINTER(bp), PACK(csize, 1));
+        PUT(GET_FOOT_POINTER(bp), PACK(csize, 1));
     }
 }
