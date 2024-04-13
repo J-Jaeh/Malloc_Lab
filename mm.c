@@ -66,16 +66,19 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 
-static void *extend_heap(size_t);
+//
+static char *heap_listp;
+//
 
+static void *extend_heap(size_t);
+static void *coalesce(void *);
 /*
  * mm_init - initialize the malloc package.
  */
 int mm_init(void)
 {
-
     /*빈 가용 리스트를 만들기위헤 메모리 시스템에서 4워드를 가져온다*/
-    void *heap_listp = mem_sbrk(4 * WSIZE);
+    heap_listp = mem_sbrk(4 * WSIZE);
     if ((heap_listp) == (void *)-1)
         return -1;
     PUT(heap_listp, 0);
