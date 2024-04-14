@@ -64,7 +64,7 @@ static char *heap_listp;
 
 static void *extend_heap(size_t);
 static void *coalesce(void *);
-static void *find_fit(size_t);
+static char *find_fit(size_t);
 static void place(void *, size_t);
 /*
  * mm_init - initialize the malloc package.
@@ -215,10 +215,10 @@ void *mm_realloc(void *bp, size_t size)
     // return newptr;
 }
 
-static void *find_fit(size_t asize)
+static char *find_fit(size_t asize)
 {
     /*First-fit search*/
-    void *bp;
+    char *bp;
     for (bp = heap_listp; GET_SIZE(GET_HEAD_POINTER(bp)) > 0; bp = NEXT_BLKP(bp))
     {
         if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
