@@ -60,6 +60,8 @@ team_t team = {
 
 //
 static char *heap_listp;
+// static char *init;
+
 //
 
 static void *extend_heap(size_t);
@@ -80,7 +82,7 @@ int mm_init(void)
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE);
-
+    // init = heap_listp;
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
 
@@ -222,8 +224,12 @@ void *mm_realloc(void *bp, size_t size)
 
 static char *find_fit(size_t asize)
 {
-    /*First-fit search*/
     char *bp;
+    // for (s,조건,증감) s => 시작위치 =처음 / 증가를 free 만검색하게
+    // 시작 위치가 처음이면 heap_listp를 co에서 초기화 해주면 안됨!
+    // --- -- --
+    // 이거말고 이전에 할당한 free를 확인할 방법을 생각해야함 !
+    // 위에나 아래나 프리를 모두 탐색이 베스트일거같은데
     for (bp = heap_listp; GET_SIZE(GET_HEAD_POINTER(bp)) > 0; bp = NEXT_BLKP(bp))
     {
         if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
@@ -231,6 +237,14 @@ static char *find_fit(size_t asize)
             return bp;
         }
     }
+
+    // for (bp = init; bp < heap_listp; bp = NEXT_BLKP(bp))
+    // {
+    //     if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
+    //     {
+    //         return bp;
+    //     }
+    // }
     return NULL; /* No fit*/
 }
 
