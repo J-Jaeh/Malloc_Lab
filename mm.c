@@ -40,7 +40,7 @@ team_t team = {
 
 #define DSIZE 8 /*더블 워드 크기*/
 
-#define CHUNKSIZE (1 << 12) /*초기 가용블럭과 힙확장을 위한 기본크기*/
+#define CHUNKSIZE (1 << 6) /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
