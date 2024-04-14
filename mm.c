@@ -77,11 +77,11 @@ int mm_init(void)
     heap_listp = mem_sbrk(4 * WSIZE);
     if ((heap_listp) == (void *)-1)
         return -1;
-    PUT(heap_listp, 0);
-    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));
+    PUT(heap_listp, PACK(DSIZE, 1));
+    PUT(heap_listp + (1 * WSIZE), NULL); // successor 를 가리키는 포인터가 들어갈자리 ?
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
-    heap_listp += (2 * WSIZE);
+    heap_listp += (WSIZE);
     // init = heap_listp;
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
