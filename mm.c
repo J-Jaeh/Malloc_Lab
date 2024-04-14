@@ -142,19 +142,23 @@ void mm_free(void *ptr)
 
     PUT(GET_HEAD_POINTER(ptr), PACK(size, 0));
     PUT(GET_FOOT_POINTER(ptr), PACK(size, 0));
-
     coalesce(ptr);
 }
 
 static void *coalesce(void *bp)
 {
     size_t prev_alloc = GET_ALLOC(GET_FOOT_POINTER(PREV_BLKP(bp)));
+    // GET_HEAD_POINTER 지만 -WSIZE 만큼 가는거 기억해야함
     size_t next_alloc = GET_ALLOC(GET_HEAD_POINTER(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(GET_HEAD_POINTER(bp));
 
     // 앞 뒤 free블록이면 병합//
     if (prev_alloc && next_alloc)
+    {
+        heap_listp = bp;
         return bp;
+    }
+
     else if (prev_alloc && !next_alloc) /*다음블록이랑 병합할 수 있는 경우 -> head 는 현재 foot는 업데이트된 size를받아서 현재bp 기준으로 업데이트된만큼가서 지정?*/
     {
         size += GET_SIZE(GET_HEAD_POINTER(NEXT_BLKP(bp)));
@@ -177,6 +181,7 @@ static void *coalesce(void *bp)
         bp = PREV_BLKP(bp);
     }
 
+    heap_listp = bp;
     return bp;
 }
 
