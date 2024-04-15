@@ -35,7 +35,8 @@ team_t team = {
     ""};
 
 //-- Basic constants and macros  --//
-
+#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
+#define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
 #define WSIZE 4 /*워드 크기*/
 
 #define DSIZE 8 /*더블 워드 크기*/
@@ -55,11 +56,9 @@ team_t team = {
 #define GET_HEAD_POINTER(bp) ((char *)(bp)-WSIZE)
 #define GET_FOOT_POINTER(bp) ((char *)(bp) + GET_SIZE(GET_HEAD_POINTER(bp)) - DSIZE)
 
-#define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp)-WSIZE)))
-#define PREV_BLKP(bp) ((char *)(bp)-GET_SIZE(((char *)(bp)-DSIZE)))
-
 //
 static char *heap_listp;
+static char *init_successor;
 // static char *init;
 
 //
@@ -68,6 +67,7 @@ static void *extend_heap(size_t);
 static void *coalesce(void *);
 static char *find_fit(size_t);
 static void place(void *, size_t);
+
 /*
  * mm_init - initialize the malloc package.
  */
@@ -77,15 +77,17 @@ int mm_init(void)
     heap_listp = mem_sbrk(4 * WSIZE);
     if ((heap_listp) == (void *)-1)
         return -1;
-    PUT(heap_listp, PACK(DSIZE, 1));
-    PUT(heap_listp + (1 * WSIZE), NULL); // successor 를 가리키는 포인터가 들어갈자리 ?
-    PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
+
+    PUT(heap_listp + (0 * WSIZE), PACK(12, 1));
+    PUT(heap_listp + (1 * WSIZE), NULL); // successor 를 가리키는 포인터가 들어갈자리 ?Z
+    PUT(heap_listp + (2 * WSIZE), PACK(12, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (WSIZE);
+    init_successor = heap_listp; //
     // init = heap_listp;
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
-
+    printf("in init\n");
     return 0;
 }
 
@@ -157,33 +159,81 @@ static void *coalesce(void *bp)
     // 앞 뒤 free블록이면 병합//
     if (prev_alloc && next_alloc)
     {
-        heap_listp = bp;
+        if (GET(init_successor) == NULL)
+        {
+            PUT(bp, init_successor);
+            PUT(bp + WSIZE, NULL);
+            // 진입점 val 업데이트.
+            PUT(init_successor, bp);
+        }
+        else
+        {
+            // 기존 블럭의 이전값 업데이트
+            PUT(GET(init_successor), bp);
+            // 새로들어가는애의 pre는 시작점이들어가야하고, next에는 기존pre가 지목하고있던애만 연결해주면되나 ?
+            PUT(bp, init_successor);
+            PUT(bp + WSIZE, GET(init_successor));
+            // 진입점 val 업데이트
+            PUT(init_successor, bp);
+        }
         return bp;
     }
-
-    else if (prev_alloc && !next_alloc) /*다음블록이랑 병합할 수 있는 경우 -> head 는 현재 foot는 업데이트된 size를받아서 현재bp 기준으로 업데이트된만큼가서 지정?*/
+    else if (prev_alloc && !next_alloc)
     {
+        /*
+         * 다음블록이랑 병합이 가능한경우 다음블럭의 이전과 다음을 연결
+         *  init -> new -> ori_init ->,,,->a->Y->c,, 여기서 a->c로 연결해야함
+         */
+        // a->Y->c 에서 a->c 과정
+        char *next_free_block_next = GET(NEXT_BLKP(bp)); // Y를 가리키는 이전 블럭 포인터 의 넥스트에 Y다음껄 넣어주면됨 .
+        PUT(next_free_block_next + WSIZE, GET(NEXT_BLKP(bp) + WSIZE));
+
+        // 통합
         size += GET_SIZE(GET_HEAD_POINTER(NEXT_BLKP(bp)));
         PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
         PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
     }
-    else if (!prev_alloc && next_alloc) /*이전 블록과 통합.. foot 먼저 지정해야 오류가 없을듯?*/
+    else if (!prev_alloc && next_alloc)
     {
+        /*
+         * 이전 블록과 통합 이전블록만 조작해주면됨
+         * ori-init -> b ->.... -> a-> 이전블록->c
+         * init -> 이전블록 -> ori_init -> ... ->a->c
+         */
+        // 통합후 기준 bp 변경
         size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp)));
         PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
         PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
+
+        char *pre_free_block_next = GET(PREV_BLKP(bp));
+        PUT(pre_free_block_next + WSIZE, GET(PREV_BLKP(bp) + WSIZE));
     }
     else
-    {
+    { /*
+       * 양쪽에 넣는과정 ......next 블럭 처리 -> 통합 -> 이전꺼처리
+       */
+        // Y를 가리키는 이전 블럭 포인터 의 넥스트에 Y다음껄 넣어주면됨
+        char *next_free_block_next = GET(NEXT_BLKP(bp));
+        PUT(next_free_block_next + WSIZE, GET(NEXT_BLKP(bp) + WSIZE));
+        //
         size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp))) + GET_SIZE(GET_FOOT_POINTER(NEXT_BLKP(bp)));
-
         PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
         PUT(GET_FOOT_POINTER(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
+        //
+        char *pre_free_block_next = GET(PREV_BLKP(bp));
+        PUT(pre_free_block_next + WSIZE, GET(PREV_BLKP(bp) + WSIZE));
     }
 
-    heap_listp = bp;
+    // 기존 블럭의 이전값 업데이트
+    PUT(GET(init_successor), bp);
+    // 새로들어가는애의 pre는 시작점이들어가야하고, next에는 기존pre가 지목하고있던애만 연결해주면되나 ?
+    PUT(bp, init_successor);
+    PUT(bp + WSIZE, GET(init_successor));
+    // 진입점 val 업데이트
+    PUT(init_successor, bp);
+
     return bp;
 }
 
@@ -206,20 +256,6 @@ void *mm_realloc(void *bp, size_t size)
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
-
-    // void *oldptr = ptr;
-    // void *newptr;
-    // size_t copySize;
-
-    // newptr = mm_malloc(size);
-    // if (newptr == NULL)
-    //     return NULL;
-    // copySize = *(size_t *)((char *)oldptr - SIZE_T_SIZE);
-    // if (size < copySize)
-    //     copySize = size;
-    // memcpy(newptr, oldptr, copySize);
-    // mm_free(oldptr);
-    // return newptr;
 }
 
 static char *find_fit(size_t asize)
@@ -251,7 +287,6 @@ static char *find_fit(size_t asize)
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(GET_HEAD_POINTER(bp));
-
     if ((csize - asize) >= (2 * DSIZE))
     {
         PUT(GET_HEAD_POINTER(bp), PACK(asize, 1));
