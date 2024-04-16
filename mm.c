@@ -21,11 +21,11 @@ team_t team = {
 
 //-- Basic constants and macros  --//
 
-#define WSIZE 4             /*워드 크기*/
-#define DSIZE 8             /*더블 워드 크기*/
-#define CHUNKSIZE (1 << 8)  /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
-#define SEGREGATED_SZIE 12  // 12까지한이유는?  -> 20까지 생각해보기
-#define PAGE_REQUEST_SZIE 3 // 메모리 추가 요청시 요청하는 페이지수   --> 언제 사용하는지 확인해야함
+#define WSIZE 4            /*워드 크기*/
+#define DSIZE 8            /*더블 워드 크기*/
+#define CHUNKSIZE (1 << 8) /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
+#define SEGREGATED_SZIE 12 // 12까지한이유는?  -> 20까지 생각해보기
+// #define PAGE_REQUEST_SZIE 3 // 메모리 추가 요청시 요청하는 페이지수   --> 언제 사용하는지 확인해야함
 //--//
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 #define PACK(size, alloc) ((size) | (alloc))                                         /* 크기와 할당 비트를 통합해서 헤더와 풋터에 저장할 수 있는 값리턴 (p816 참고)*/
@@ -46,7 +46,7 @@ team_t team = {
 // #define SET_PRE_POINTER(bp, qp) (GET_PRE_FREE_POINTER(bp) = qp)
 
 static void *extend_heap(size_t);
-// static void *coalesce(void *);
+static void *coalesce(void *);
 static char *find_fit(size_t);
 static void place(void *, size_t);
 
@@ -78,37 +78,15 @@ int mm_init(void)
         PUT(heap_listp + ((2 + i) * WSIZE), NULL);
     }
     heap_listp += DSIZE;
-    /*힙 확장을 안하고 필요할때 한다는 건가 ? 좋은 방식인지는 모르겠다 차라리 initheap을정해서 하는것도 ?*/
+
+    if (extend_heap(4) == NULL)
+        return -1;
+    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+        return -1;
+
     return 0;
 }
 
-static void *extend_heap(size_t words)
-{
-    char *bp;
-    char *new_bp;
-    size_t size;
-
-    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
-    if ((long)(new_bp = mem_sbrk(size)) == -1)
-        return NULL;
-
-    bp = new_bp;
-    size_t page_size = size / PAGE_REQUEST_SZIE; // 블록하나의 크기 ?  지금기준에서는 3등분?
-    while (size >= page_size)
-    {
-        PUT(GET_HEAD_POINTER(bp), PACK(page_size, 0)); // 빈블록의 헤더 초기화 ? 풋터는 초기화 안시켜주는 이유는 ?
-        put_front_free_list(bp);
-        size -= page_size;
-        bp += page_size;
-    }
-    /// 아? 병합이 필요없어지는건가 ?
-    return new_bp;
-}
-
-/*
- * mm_malloc - Allocate a block by incrementing the brk pointer.
- *     Always allocate a block whose size is a multiple of the alignment.
- */
 void *mm_malloc(size_t size)
 {
     size_t asize;      /*Adjusted block size*/
@@ -129,27 +107,22 @@ void *mm_malloc(size_t size)
         return bp;
     }
 
-    extendsize = asize * PAGE_REQUEST_SZIE;
+    extendsize = MAX(asize, CHUNKSIZE);
     if ((bp = extend_heap(extendsize / WSIZE)) == NULL)
         return NULL;
     place(bp, asize);
     return bp;
 }
 
-/*
- * mm_free - Freeing a block does nothing.
- */
 void mm_free(void *ptr)
 {
-
     size_t size = GET_SIZE(GET_HEAD_POINTER(ptr));
 
-    PUT(GET_HEAD_POINTER(ptr), PACK(size, 0)); /*foot은? 헤더만으로 가능한가 ?*/
-    put_front_free_list(ptr);
+    PUT(GET_HEAD_POINTER(ptr), PACK(size, 0));
+    PUT(GET_FOOT_POINTER(ptr), PACK(size, 0));
+    coalesce(ptr);
 }
-/*
- * mm_realloc - Implemented simply in terms of mm_malloc and mm_free
- */
+
 void *mm_realloc(void *bp, size_t size)
 {
     if (bp == NULL)
@@ -166,6 +139,61 @@ void *mm_realloc(void *bp, size_t size)
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
+}
+
+static void *extend_heap(size_t words)
+{
+    char *bp;
+
+    size_t size;
+
+    size = (words % 2) ? (words + 1) * WSIZE : words * WSIZE;
+    if ((long)(bp = mem_sbrk(size)) == -1)
+        return NULL;
+
+    PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
+    PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
+    PUT(GET_HEAD_POINTER(NEXT_BLKP(bp)), PACK(0, 1));
+    return coalesce(bp);
+}
+
+static void *coalesce(void *bp)
+{
+    size_t prev_alloc = GET_ALLOC(GET_FOOT_POINTER(PREV_BLKP(bp))); /*이전 블록 할당 상태*/
+    size_t next_alloc = GET_ALLOC(GET_HEAD_POINTER(PREV_BLKP(bp))); /*다음 블록 할당 상태*/
+    size_t size = GET_SIZE(GET_HEAD_POINTER(bp));
+
+    if (prev_alloc && next_alloc)
+    {
+        put_front_free_list(bp);
+        return bp;
+    }
+    else if (prev_alloc && !next_alloc)
+    {
+        remove_in_free_list(NEXT_BLKP(bp));
+        size += GET_SIZE(GET_HEAD_POINTER(NEXT_BLKP(bp)));
+        PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
+        PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
+    }
+    else if (!prev_alloc && next_alloc)
+    {
+        remove_in_free_list(PREV_BLKP(bp));
+        size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp)));
+        PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    else
+    {
+        remove_in_free_list(PREV_BLKP(bp));
+        remove_in_free_list(NEXT_BLKP(bp));
+        size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp))) + GET_SIZE(GET_FOOT_POINTER(NEXT_BLKP(bp)));
+        PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(GET_FOOT_POINTER(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    put_front_free_list(bp);
+    return bp;
 }
 
 static char *find_fit(size_t asize)
@@ -192,7 +220,22 @@ static char *find_fit(size_t asize)
 static void place(void *bp, size_t asize)
 {
     remove_in_free_list(bp);
-    PUT(GET_HEAD_POINTER(bp), PACK(GET_SIZE(GET_HEAD_POINTER(bp)), 1));
+    size_t csize = GET_SIZE(GET_HEAD_POINTER(bp));
+    if ((csize - asize) >= (2 * DSIZE))
+    {
+        PUT(GET_HEAD_POINTER(bp), PACK(asize, 1));
+        PUT(GET_FOOT_POINTER(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+
+        PUT(GET_HEAD_POINTER(bp), PACK((csize - asize), 0));
+        PUT(GET_FOOT_POINTER(bp), PACK((csize - asize), 0));
+        put_front_free_list(bp);
+    }
+    else
+    {
+        PUT(GET_HEAD_POINTER(bp), PACK(csize, 1));
+        PUT(GET_FOOT_POINTER(bp), PACK(csize, 1));
+    }
 }
 
 static void remove_in_free_list(void *bp)
