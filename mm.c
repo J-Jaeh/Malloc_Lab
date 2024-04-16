@@ -232,7 +232,7 @@ static void remove_in_free_list(void *bp)
     int class = get_class(GET_SIZE(HDRP(bp)));
     if (bp == GET_ROOT(class))
     {
-        GET_ROOT(class) = GET_SUCC(GET_ROOT(class));
+        GET_ROOT(class) = GET_SUCC(bp);
         return;
     }
     GET_SUCC(GET_PRED(bp)) = GET_SUCC(bp);
