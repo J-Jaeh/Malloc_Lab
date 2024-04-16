@@ -1,14 +1,3 @@
-/*
- * mm-naive.c - The fastest, least memory-efficient malloc package.
- *
- * In this naive approach, a block is allocated by simply incrementing
- * the brk pointer.  A block is pure payload. There are no headers or
- * footers.  Blocks are never coalesced or reused. Realloc is
- * implemented directly using mm_malloc and mm_free.
- *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
- */
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
@@ -18,15 +7,11 @@
 #include "mm.h"
 #include "memlib.h"
 
-/*********************************************************
- * NOTE TO STUDENTS: Before you do anything else, please
- * provide your team information in the following struct.
- ********************************************************/
 team_t team = {
     /* Team name */
     "6team",
     /* First member's full name */
-    "JJGH",
+    "JJH",
     /* First member's email address */
     "1wo2gur@gmail.com",
     /* Second member's full name (leave blank if none) */
@@ -41,7 +26,7 @@ team_t team = {
 
 #define DSIZE 8 /*더블 워드 크기*/
 
-#define CHUNKSIZE (1 << 6) /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
+#define CHUNKSIZE (1 << 8) /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
 
 #define MAX(x, y) ((x) > (y) ? (x) : (y))
 
@@ -50,23 +35,30 @@ team_t team = {
 #define GET(p) (*(unsigned int *)(p))              /* p가 가리키는 워드를 읽어서 리턴*/
 #define PUT(p, val) (*(unsigned int *)(p) = (val)) /* 워드에 val 저장*/
 
-#define GET_SIZE(p) (GET(p) & ~0x7)  /* 헤더 또는 풋터의 사이즈 리턴*/
+#define GET_SIZE(p) (GET(p) & ~0x07) /* 헤더 또는 풋터의 사이즈 리턴*/
 #define GET_ALLOC(p) (GET(p) & 0x01) /* 헤더 또는 풋터의 할당비트 리턴 */
 
 #define GET_HEAD_POINTER(bp) ((char *)(bp)-WSIZE)
 #define GET_FOOT_POINTER(bp) ((char *)(bp) + GET_SIZE(GET_HEAD_POINTER(bp)) - DSIZE)
 
-//
-static char *heap_listp;
-static char *init_successor;
-// static char *init;
+#define GET_PRE_FREE_POINTER(bp) (*(void **)(bp))
+#define GET_NEXT_FREE_POINTER(bp) (*(void **)(bp + WSIZE))
 
-//
+#define SET_NEXT_POINTER(bp, qp) (GET_NEXT_FREE_POINTER(bp) = qp)
+#define SET_PRE_POINTER(bp, qp) (GET_PRE_FREE_POINTER(bp) = qp)
 
 static void *extend_heap(size_t);
 static void *coalesce(void *);
 static char *find_fit(size_t);
 static void place(void *, size_t);
+
+static void remove_in_free_list(void *bp);
+static void put_front_free_list(void *bp);
+
+//
+static char *heap_listp;
+static char *free_listp;
+//
 
 /*
  * mm_init - initialize the malloc package.
@@ -74,20 +66,23 @@ static void place(void *, size_t);
 int mm_init(void)
 {
     /*빈 가용 리스트를 만들기위헤 메모리 시스템에서 4워드를 가져온다*/
-    heap_listp = mem_sbrk(4 * WSIZE);
+    heap_listp = mem_sbrk(6 * WSIZE);
     if ((heap_listp) == (void *)-1)
         return -1;
+    PUT(heap_listp + (0 * WSIZE), PACK(0, 0));
+    PUT(heap_listp + (1 * WSIZE), PACK(2 * DSIZE, 1));
+    PUT(heap_listp + (2 * WSIZE), NULL); // successor 를 가리키는 포인터가 들어갈자리 ?
+    PUT(heap_listp + (3 * WSIZE), NULL);
+    PUT(heap_listp + (4 * WSIZE), PACK(2 * DSIZE, 1));
+    PUT(heap_listp + (5 * WSIZE), PACK(0, 1));
 
-    PUT(heap_listp + (0 * WSIZE), PACK(12, 1));
-    PUT(heap_listp + (1 * WSIZE), NULL); // successor 를 가리키는 포인터가 들어갈자리 ?Z
-    PUT(heap_listp + (2 * WSIZE), PACK(12, 1));
-    PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
-    heap_listp += (WSIZE);
-    init_successor = heap_listp; //
-    // init = heap_listp;
+    free_listp = heap_listp + (DSIZE);
+    if (extend_heap(4) == NULL)
+        return -1;
+
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
         return -1;
-    printf("in init\n");
+    // printf("in init\n");
     return 0;
 }
 
@@ -142,6 +137,8 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    if (ptr == NULL)
+        return;
     size_t size = GET_SIZE(GET_HEAD_POINTER(ptr));
 
     PUT(GET_HEAD_POINTER(ptr), PACK(size, 0));
@@ -151,31 +148,15 @@ void mm_free(void *ptr)
 
 static void *coalesce(void *bp)
 {
+    // printf("%d\n", PREV_BLKP(bp) == bp ? 1 : 0);
     size_t prev_alloc = GET_ALLOC(GET_FOOT_POINTER(PREV_BLKP(bp)));
     // GET_HEAD_POINTER 지만 -WSIZE 만큼 가는거 기억해야함
     size_t next_alloc = GET_ALLOC(GET_HEAD_POINTER(NEXT_BLKP(bp)));
     size_t size = GET_SIZE(GET_HEAD_POINTER(bp));
 
-    // 앞 뒤 free블록이면 병합//
     if (prev_alloc && next_alloc)
     {
-        if (GET(init_successor) == NULL)
-        {
-            PUT(bp, init_successor);
-            PUT(bp + WSIZE, NULL);
-            // 진입점 val 업데이트.
-            PUT(init_successor, bp);
-        }
-        else
-        {
-            // 기존 블럭의 이전값 업데이트
-            PUT(GET(init_successor), bp);
-            // 새로들어가는애의 pre는 시작점이들어가야하고, next에는 기존pre가 지목하고있던애만 연결해주면되나 ?
-            PUT(bp, init_successor);
-            PUT(bp + WSIZE, GET(init_successor));
-            // 진입점 val 업데이트
-            PUT(init_successor, bp);
-        }
+        put_front_free_list(bp);
         return bp;
     }
     else if (prev_alloc && !next_alloc)
@@ -185,11 +166,9 @@ static void *coalesce(void *bp)
          *  init -> new -> ori_init ->,,,->a->Y->c,, 여기서 a->c로 연결해야함
          */
         // a->Y->c 에서 a->c 과정
-        char *next_free_block_next = GET(NEXT_BLKP(bp)); // Y를 가리키는 이전 블럭 포인터 의 넥스트에 Y다음껄 넣어주면됨 .
-        PUT(next_free_block_next + WSIZE, GET(NEXT_BLKP(bp) + WSIZE));
-
         // 통합
         size += GET_SIZE(GET_HEAD_POINTER(NEXT_BLKP(bp)));
+        remove_in_free_list(NEXT_BLKP(bp));
         PUT(GET_HEAD_POINTER(bp), PACK(size, 0));
         PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
     }
@@ -200,40 +179,27 @@ static void *coalesce(void *bp)
          * ori-init -> b ->.... -> a-> 이전블록->c
          * init -> 이전블록 -> ori_init -> ... ->a->c
          */
-        // 통합후 기준 bp 변경
+
         size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp)));
+        remove_in_free_list(PREV_BLKP(bp));
         PUT(GET_FOOT_POINTER(bp), PACK(size, 0));
         PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-
-        char *pre_free_block_next = GET(PREV_BLKP(bp));
-        PUT(pre_free_block_next + WSIZE, GET(PREV_BLKP(bp) + WSIZE));
     }
     else
     { /*
        * 양쪽에 넣는과정 ......next 블럭 처리 -> 통합 -> 이전꺼처리
        */
         // Y를 가리키는 이전 블럭 포인터 의 넥스트에 Y다음껄 넣어주면됨
-        char *next_free_block_next = GET(NEXT_BLKP(bp));
-        PUT(next_free_block_next + WSIZE, GET(NEXT_BLKP(bp) + WSIZE));
         //
         size += GET_SIZE(GET_HEAD_POINTER(PREV_BLKP(bp))) + GET_SIZE(GET_FOOT_POINTER(NEXT_BLKP(bp)));
+        remove_in_free_list(NEXT_BLKP(bp));
+        remove_in_free_list(PREV_BLKP(bp));
         PUT(GET_HEAD_POINTER(PREV_BLKP(bp)), PACK(size, 0));
         PUT(GET_FOOT_POINTER(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
-        //
-        char *pre_free_block_next = GET(PREV_BLKP(bp));
-        PUT(pre_free_block_next + WSIZE, GET(PREV_BLKP(bp) + WSIZE));
     }
-
-    // 기존 블럭의 이전값 업데이트
-    PUT(GET(init_successor), bp);
-    // 새로들어가는애의 pre는 시작점이들어가야하고, next에는 기존pre가 지목하고있던애만 연결해주면되나 ?
-    PUT(bp, init_successor);
-    PUT(bp + WSIZE, GET(init_successor));
-    // 진입점 val 업데이트
-    PUT(init_successor, bp);
-
+    put_front_free_list(bp);
     return bp;
 }
 
@@ -261,43 +227,59 @@ void *mm_realloc(void *bp, size_t size)
 static char *find_fit(size_t asize)
 {
     char *bp;
-    // for (s,조건,증감) s => 시작위치 =처음 / 증가를 free 만검색하게
-    // 시작 위치가 처음이면 heap_listp를 co에서 초기화 해주면 안됨!
-    // --- -- --
-    // 이거말고 이전에 할당한 free를 확인할 방법을 생각해야함 !
-    // 위에나 아래나 프리를 모두 탐색이 베스트일거같은데
-    for (bp = heap_listp; GET_SIZE(GET_HEAD_POINTER(bp)) > 0; bp = NEXT_BLKP(bp))
-    {
-        if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
-        {
-            return bp;
-        }
-    }
 
-    // for (bp = init; bp < heap_listp; bp = NEXT_BLKP(bp))
+    // for (bp = NEXT_BLKP(bp); GET_SIZE(GET_HEAD_POINTER(bp)) > 0; bp = NEXT_BLKP(bp))
     // {
-    //     if ((!GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
+    //     if (!(GET_ALLOC(GET_HEAD_POINTER(bp))) && (asize <= GET_SIZE(GET_HEAD_POINTER(bp))))
     //     {
     //         return bp;
     //     }
     // }
+
+    for (bp = free_listp; !GET_ALLOC(GET_HEAD_POINTER(bp)); bp = GET_NEXT_FREE_POINTER(bp))
+    {
+        if (asize <= (size_t)GET_SIZE(GET_HEAD_POINTER(bp)))
+            return bp;
+    }
+
     return NULL; /* No fit*/
 }
 
 static void place(void *bp, size_t asize)
 {
     size_t csize = GET_SIZE(GET_HEAD_POINTER(bp));
+
     if ((csize - asize) >= (2 * DSIZE))
     {
         PUT(GET_HEAD_POINTER(bp), PACK(asize, 1));
         PUT(GET_FOOT_POINTER(bp), PACK(asize, 1));
+        remove_in_free_list(bp);
         bp = NEXT_BLKP(bp);
         PUT(GET_HEAD_POINTER(bp), PACK(csize - asize, 0));
         PUT(GET_FOOT_POINTER(bp), PACK(csize - asize, 0));
+        coalesce(bp);
     }
     else
     {
         PUT(GET_HEAD_POINTER(bp), PACK(csize, 1));
         PUT(GET_FOOT_POINTER(bp), PACK(csize, 1));
+        remove_in_free_list(bp);
     }
+}
+
+void remove_in_free_list(void *bp)
+{
+    if (GET_PRE_FREE_POINTER(bp))
+        SET_NEXT_POINTER(GET_PRE_FREE_POINTER(bp), GET_NEXT_FREE_POINTER(bp));
+    else
+        free_listp = GET_NEXT_FREE_POINTER(bp);
+    SET_PRE_POINTER(GET_NEXT_FREE_POINTER(bp), GET_PRE_FREE_POINTER(bp));
+}
+
+void put_front_free_list(void *bp)
+{
+    SET_NEXT_POINTER(bp, free_listp);
+    SET_PRE_POINTER(free_listp, bp);
+    SET_PRE_POINTER(bp, NULL);
+    free_listp = bp;
 }
