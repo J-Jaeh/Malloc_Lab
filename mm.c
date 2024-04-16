@@ -11,7 +11,7 @@ team_t team = {
     /* Team name */
     "6team",
     /* First member's full name */
-    "JJH",
+    "진재혁_이민형_권지현",
     /* First member's email address */
     "1wo2gur@gmail.com",
     /* Second member's full name (leave blank if none) */
@@ -46,7 +46,7 @@ team_t team = {
 // #define SET_PRE_POINTER(bp, qp) (GET_PRE_FREE_POINTER(bp) = qp)
 
 static void *extend_heap(size_t);
-static void *coalesce(void *);
+// static void *coalesce(void *);
 static char *find_fit(size_t);
 static void place(void *, size_t);
 
@@ -129,7 +129,7 @@ void *mm_malloc(size_t size)
         return bp;
     }
 
-    extendsize = MAX(asize, CHUNKSIZE);
+    extendsize = asize * PAGE_REQUEST_SZIE;
     if ((bp = extend_heap(extendsize / WSIZE)) == NULL)
         return NULL;
     place(bp, asize);
@@ -141,8 +141,7 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    if (ptr == NULL)
-        return;
+
     size_t size = GET_SIZE(GET_HEAD_POINTER(ptr));
 
     PUT(GET_HEAD_POINTER(ptr), PACK(size, 0)); /*foot은? 헤더만으로 가능한가 ?*/
