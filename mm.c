@@ -85,7 +85,7 @@ int mm_init(void)
 
     if (extend_heap(4) == NULL)
         return -1;
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
+    if (extend_heap(INITCHUNKSIZE / WSIZE) == NULL)
         return -1;
 
     return 0;
@@ -163,18 +163,16 @@ static void *extend_heap(size_t words)
 
 static void *coalesce(void *bp)
 {
-    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp))); /*이전 블록 할당 상태*/
-    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp))); /*다음 블록 할당 상태*/
     size_t size = GET_SIZE(HDRP(bp));
 
-    if (!next_alloc)
+    if (!GET_ALLOC(HDRP(NEXT_BLKP(bp))))
     {
         remove_in_free_list(NEXT_BLKP(bp));
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
     }
-    if (!prev_alloc)
+    if (!GET_ALLOC(FTRP(PREV_BLKP(bp))))
     {
         remove_in_free_list(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
