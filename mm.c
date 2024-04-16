@@ -21,8 +21,9 @@ team_t team = {
 
 //-- Basic constants and macros  --//
 
-#define WSIZE 4             /*워드 크기*/
-#define DSIZE 8             /*더블 워드 크기*/
+#define WSIZE 4 /*워드 크기*/
+#define DSIZE 8 /*더블 워드 크기*/
+#define INITCHUNKSIZE (1 << 6)
 #define CHUNKSIZE (1 << 12) /*초기 가용블럭과 힙확장을 위한 기본크기 1을 비트쉬프트로 12번이동 ~ =2^12승 = 4096=4KB*/
 #define SEGREGATED_SIZE 12  // 12까지한이유는?  -> 20까지 생각해보기
 // #define PAGE_REQUEST_SZIE 3 // 메모리 추가 요청시 요청하는 페이지수   --> 언제 사용하는지 확인해야함
@@ -177,9 +178,9 @@ static void *coalesce(void *bp)
     {
         remove_in_free_list(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        PUT(FTRP(bp), PACK(size, 0));
         bp = PREV_BLKP(bp);
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
     }
     put_front_free_list(bp);
     return bp;
